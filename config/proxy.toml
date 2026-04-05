@@ -1,0 +1,63 @@
+# Noor Proxy — 0.5B research model for architecture validation
+# Phase 0 only. Throwaway. Validates SMEBU + routing + parallel dense+MoE.
+
+[model]
+name = "noor-proxy"
+d_model = 768
+n_layers = 16
+n_heads = 12
+n_kv_heads = 4
+head_dim = 64
+vocab_size = 32000
+context_length = 2048
+precision = "f32"  # f32 for debugging, bf16 for speed
+
+[moe]
+enabled = true
+n_experts = 8
+n_active_experts = 2
+has_shared_expert = true
+expert_ffn_dim = 384
+dense_ffn_dim = 1024
+
+[attention]
+sliding_window = 512
+global_every_n = 6
+
+[norm]
+sandwich = true
+eps = 1e-6
+
+[residual]
+use_attnres = false  # standard residuals for proxy
+attnres_blocks = 4
+
+[ple]
+enabled = false
+ple_dim = 64
+
+[rope]
+theta = 10000.0
+prope_theta = 1000000.0
+prope_fraction = 0.25
+
+[training]
+lr_max = 3e-4
+lr_min = 3e-5
+warmup_steps = 500
+total_steps = 10000
+batch_size_tokens = 65536   # 64K
+micro_batch_tokens = 2048
+grad_clip = 1.0
+checkpoint_every_steps = 500
+log_every_steps = 10
+
+[optimizer]
+type = "muon"
+beta = 0.9
+qk_clip_tau = 100.0
+
+[smebu]
+kappa = 5.0
+beta = 0.9
+lambda = 0.01

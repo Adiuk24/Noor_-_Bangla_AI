@@ -1,0 +1,18 @@
+[package]
+name = "noor-train"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Training loop, data pipeline, optimizers, and eval harness for Noor"
+
+[dependencies]
+noor-core.workspace = true
+serde.workspace = true
+toml.workspace = true
+memmap2.workspace = true
+indicatif.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+approx = "0.5"

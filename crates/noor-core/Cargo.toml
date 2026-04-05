@@ -1,0 +1,16 @@
+[package]
+name = "noor-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Core tensor library, model layers, and GGUF I/O for Noor"
+
+[dependencies]
+serde.workspace = true
+toml.workspace = true
+rand.workspace = true
+rand_distr.workspace = true
+
+[dev-dependencies]
+approx = "0.5"

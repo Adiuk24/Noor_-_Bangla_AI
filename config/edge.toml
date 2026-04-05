@@ -1,0 +1,63 @@
+# Noor-Edge (E1B) — 2.8B PLE model for phone, RPi, browser
+# No MoE. Per-Layer Embeddings instead.
+
+[model]
+name = "noor-edge"
+d_model = 1024
+n_layers = 24
+n_heads = 8
+n_kv_heads = 2
+head_dim = 128
+vocab_size = 64000
+context_length = 4096
+precision = "bf16"
+
+[moe]
+enabled = false
+n_experts = 0
+n_active_experts = 0
+has_shared_expert = false
+expert_ffn_dim = 0
+dense_ffn_dim = 2816
+
+[attention]
+sliding_window = 512
+global_every_n = 0  # sliding only for edge
+
+[norm]
+sandwich = false  # pre-norm only for edge
+eps = 1e-6
+
+[residual]
+use_attnres = false  # standard residuals for edge
+attnres_blocks = 0
+
+[ple]
+enabled = true
+ple_dim = 128
+
+[rope]
+theta = 10000.0
+prope_theta = 1000000.0
+prope_fraction = 0.0  # no p-RoPE for edge (no global layers)
+
+[training]
+lr_max = 3e-4
+lr_min = 3e-5
+warmup_steps = 1000
+total_steps = 100000
+batch_size_tokens = 262144   # 256K
+micro_batch_tokens = 2048
+grad_clip = 1.0
+checkpoint_every_steps = 1000
+log_every_steps = 10
+
+[optimizer]
+type = "muon"
+beta = 0.9
+qk_clip_tau = 100.0
+
+[smebu]
+kappa = 5.0
+beta = 0.9
+lambda = 0.01

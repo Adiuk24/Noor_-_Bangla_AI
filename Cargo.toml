@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/noor-core",
+    "crates/noor-train",
+    "crates/noor-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Arif Adito <arif@adioris.com>"]
+
+[workspace.dependencies]
+noor-core = { path = "crates/noor-core" }
+noor-train = { path = "crates/noor-train" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+memmap2 = "0.9"
+indicatif = "0.17"
+rand = "0.8"
+rand_distr = "0.4"

@@ -1,0 +1,63 @@
+# Noor-Pro (E3B) — 12B MoE, 3B active. Laptop (24GB M4).
+# Full architecture: parallel dense+MoE, sandwich norm, Block AttnRes, dual RoPE.
+
+[model]
+name = "noor-pro"
+d_model = 2048
+n_layers = 32
+n_heads = 16
+n_kv_heads = 4
+head_dim = 128
+vocab_size = 64000
+context_length = 4096
+precision = "bf16"
+
+[moe]
+enabled = true
+n_experts = 32
+n_active_experts = 4
+has_shared_expert = true
+expert_ffn_dim = 512
+dense_ffn_dim = 1536
+
+[attention]
+sliding_window = 1024
+global_every_n = 6  # 5:1 sliding/global ratio
+
+[norm]
+sandwich = true
+eps = 1e-6
+
+[residual]
+use_attnres = true
+attnres_blocks = 8
+
+[ple]
+enabled = false
+ple_dim = 0
+
+[rope]
+theta = 10000.0
+prope_theta = 1000000.0
+prope_fraction = 0.25
+
+[training]
+lr_max = 3e-4
+lr_min = 3e-5
+warmup_steps = 2000
+total_steps = 500000
+batch_size_tokens = 524288   # 512K
+micro_batch_tokens = 2048
+grad_clip = 1.0
+checkpoint_every_steps = 1000
+log_every_steps = 10
+
+[optimizer]
+type = "muon"
+beta = 0.9
+qk_clip_tau = 100.0
+
+[smebu]
+kappa = 5.0
+beta = 0.9
+lambda = 0.01
