@@ -1,6 +1,6 @@
-//! Noor model — full MoE transformer assembled from Burn modules.
+//! Noor model — full transformer assembled from Burn modules.
 //!
-//! Supports: proxy (288M), edge (2.8B PLE), pro (12B MoE), max (28B MoE).
+//! Supports: proxy (288M MoE), edge (2.8B PLE), pro (12B MoE), max (28B MoE).
 //! Architecture matches docs/2026-04-06-noor-architecture-design.md exactly.
 
 use burn::prelude::*;
@@ -8,12 +8,28 @@ use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig, RmsNorm, RmsNor
 use burn::nn::loss::CrossEntropyLossConfig;
 
 use crate::config::NoorConfig;
-use crate::layers::block::MoeBlock;
+use crate::layers::block::{MoeBlock, DenseBlock};
+
+/// Unified transformer block — either MoE (proxy/pro/max) or Dense+PLE (edge).
+#[derive(Module, Debug)]
+pub enum TransformerBlock<B: Backend> {
+    Moe(MoeBlock<B>),
+    Dense(DenseBlock<B>),
+}
+
+impl<B: Backend> TransformerBlock<B> {
+    pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
+        match self {
+            Self::Moe(block) => block.forward(x),
+            Self::Dense(block) => block.forward(x),
+        }
+    }
+}
 
 #[derive(Module, Debug)]
 pub struct NoorModel<B: Backend> {
     embedding: Embedding<B>,
-    blocks: Vec<MoeBlock<B>>,
+    blocks: Vec<TransformerBlock<B>>,
     final_norm: RmsNorm<B>,
     output_proj: Linear<B>,
     vocab_size: usize,
@@ -24,30 +40,55 @@ impl<B: Backend> NoorModel<B> {
     pub fn from_config(config: &NoorConfig, device: &B::Device) -> Self {
         let d = config.model.d_model;
         let vocab = config.model.vocab_size;
+        let n_layers = config.model.n_layers;
+        let use_ple = config.ple.enabled && !config.moe.enabled;
 
-        let blocks = (0..config.model.n_layers)
+        let blocks = (0..n_layers)
             .map(|i| {
-                let is_global = (i + 1) % config.attention.global_every_n == 0;
+                let is_global = if config.attention.global_every_n > 0 {
+                    (i + 1) % config.attention.global_every_n == 0
+                } else {
+                    false
+                };
                 let theta = if is_global { config.rope.prope_theta } else { config.rope.theta };
 
-                MoeBlock::new(
-                    d,
-                    config.model.n_heads,
-                    config.model.n_kv_heads,
-                    config.model.head_dim,
-                    config.moe.dense_ffn_dim,
-                    config.moe.expert_ffn_dim,
-                    config.moe.n_experts,
-                    config.moe.n_active_experts,
-                    config.moe.has_shared_expert,
-                    config.attention.sliding_window,
-                    is_global,
-                    theta,
-                    config.model.context_length,
-                    config.norm.eps,
-                    i,
-                    device,
-                )
+                if use_ple {
+                    TransformerBlock::Dense(DenseBlock::new(
+                        d,
+                        config.model.n_heads,
+                        config.model.n_kv_heads,
+                        config.model.head_dim,
+                        config.moe.dense_ffn_dim,
+                        config.ple.ple_dim,
+                        n_layers,
+                        config.attention.sliding_window,
+                        is_global,
+                        theta,
+                        config.model.context_length,
+                        config.norm.eps,
+                        i,
+                        device,
+                    ))
+                } else {
+                    TransformerBlock::Moe(MoeBlock::new(
+                        d,
+                        config.model.n_heads,
+                        config.model.n_kv_heads,
+                        config.model.head_dim,
+                        config.moe.dense_ffn_dim,
+                        config.moe.expert_ffn_dim,
+                        config.moe.n_experts,
+                        config.moe.n_active_experts,
+                        config.moe.has_shared_expert,
+                        config.attention.sliding_window,
+                        is_global,
+                        theta,
+                        config.model.context_length,
+                        config.norm.eps,
+                        i,
+                        device,
+                    ))
+                }
             })
             .collect();
 
