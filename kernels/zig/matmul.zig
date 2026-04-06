@@ -4,6 +4,7 @@
 // Called from Rust via C ABI FFI.
 
 const std = @import("std");
+const cc = std.builtin.CallingConvention;
 
 // Tile sizes tuned for M4 L1 cache (192KB, 6-way)
 const TILE_M: usize = 8;
@@ -19,7 +20,7 @@ export fn noor_matmul_f32(
     m: u32,
     k: u32,
     n: u32,
-) callconv(.C) void {
+) void {
     const M: usize = @intCast(m);
     const K: usize = @intCast(k);
     const N: usize = @intCast(n);
@@ -75,10 +76,76 @@ export fn noor_matmul_f32(
     }
 }
 
+/// RMSNorm forward: out = x / sqrt(mean(x^2) + eps) * weight
+export fn noor_rmsnorm_f32(
+    x_ptr: [*]const f32,
+    w_ptr: [*]const f32,
+    out_ptr: [*]f32,
+    n_vecs: u32,
+    dim: u32,
+    eps: f32,
+) void {
+    const N: usize = @intCast(n_vecs);
+    const D: usize = @intCast(dim);
+
+    var v: usize = 0;
+    while (v < N) : (v += 1) {
+        const offset = v * D;
+
+        // Compute sum of squares
+        var sum_sq: f32 = 0.0;
+        var d: usize = 0;
+        while (d < D) : (d += 1) {
+            const val = x_ptr[offset + d];
+            sum_sq += val * val;
+        }
+
+        // RMS
+        const rms = @sqrt(sum_sq / @as(f32, @floatFromInt(D)) + eps);
+        const inv_rms = 1.0 / rms;
+
+        // Normalize and scale
+        d = 0;
+        while (d < D) : (d += 1) {
+            out_ptr[offset + d] = x_ptr[offset + d] * inv_rms * w_ptr[d];
+        }
+    }
+}
+
+/// SiLU activation: out = x * sigmoid(x) = x / (1 + exp(-x))
+export fn noor_silu_f32(
+    x_ptr: [*]const f32,
+    out_ptr: [*]f32,
+    len: u32,
+) void {
+    const N: usize = @intCast(len);
+    var i: usize = 0;
+    while (i < N) : (i += 1) {
+        const x = x_ptr[i];
+        out_ptr[i] = x / (1.0 + @exp(-x));
+    }
+}
+
+/// GELU activation (approximate)
+export fn noor_gelu_f32(
+    x_ptr: [*]const f32,
+    out_ptr: [*]f32,
+    len: u32,
+) void {
+    const N: usize = @intCast(len);
+    const sqrt_2_pi: f32 = @sqrt(2.0 / std.math.pi);
+    var i: usize = 0;
+    while (i < N) : (i += 1) {
+        const x = x_ptr[i];
+        const inner = sqrt_2_pi * (x + 0.044715 * x * x * x);
+        out_ptr[i] = 0.5 * x * (1.0 + std.math.tanh(inner));
+    }
+}
+
 /// Zero a float buffer.
-export fn noor_zero_f32(ptr: [*]f32, len: u32) callconv(.C) void {
+export fn noor_zero_f32(ptr: [*]f32, len: u32) void {
     const n: usize = @intCast(len);
     @memset(ptr[0..n], 0.0);
 }
 
-// Build: zig build-lib -O ReleaseFast -target aarch64-macos kernels/zig/matmul.zig
+// Build: zig build-lib -O ReleaseFast -target aarch64-macos matmul.zig

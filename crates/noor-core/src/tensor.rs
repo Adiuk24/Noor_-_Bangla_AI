@@ -341,10 +341,14 @@ pub fn matmul(a: &Tensor, b: &Tensor) -> Tensor {
     }
 }
 
-/// Tiled matmul: C += A @ B with cache-friendly tiling.
-/// A: (M, K), B: (K, N), C: (M, N).
-/// Tile size chosen for L1 cache (~64KB on M4).
+/// Tiled matmul: dispatches to Zig NEON kernel if available, Rust fallback otherwise.
 fn tiled_matmul(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize) {
+    crate::kernels::matmul_dispatch(a, b, c, m, k, n);
+}
+
+/// Rust fallback tiled matmul (used when Zig kernels aren't compiled).
+/// Public so kernels.rs can call it.
+pub fn tiled_matmul_fallback(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize) {
     const TILE: usize = 32; // 32x32 tiles fit in L1 cache
 
     // Loop order: tile_k → tile_i → tile_j for maximum reuse

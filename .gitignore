@@ -17,3 +17,6 @@ __pycache__/
 zig-cache/
 zig-out/
 .superpowers/
+kernels/zig/.zig-cache/
+kernels/zig/*.o
+kernels/zig/*.a

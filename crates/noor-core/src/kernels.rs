@@ -1,0 +1,199 @@
+//! FFI bridge to Zig NEON kernels.
+//! When compiled with `zig_kernels` feature, uses Zig.
+//! Otherwise falls back to pure Rust implementations.
+
+#[cfg(feature = "zig_kernels")]
+extern "C" {
+    /// Tiled matmul with NEON vectorization. C += A @ B.
+    pub fn noor_matmul_f32(
+        a: *const f32,
+        b: *const f32,
+        c: *mut f32,
+        m: u32,
+        k: u32,
+        n: u32,
+    );
+
+    /// RMSNorm forward.
+    pub fn noor_rmsnorm_f32(
+        x: *const f32,
+        w: *const f32,
+        out: *mut f32,
+        n_vecs: u32,
+        dim: u32,
+        eps: f32,
+    );
+
+    /// SiLU activation: x / (1 + exp(-x))
+    pub fn noor_silu_f32(x: *const f32, out: *mut f32, len: u32);
+
+    /// GELU activation (approximate)
+    pub fn noor_gelu_f32(x: *const f32, out: *mut f32, len: u32);
+
+    /// Zero a buffer
+    pub fn noor_zero_f32(ptr: *mut f32, len: u32);
+}
+
+/// Dispatch matmul to Zig kernel if available, Rust fallback otherwise.
+pub fn matmul_dispatch(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize) {
+    #[cfg(feature = "zig_kernels")]
+    unsafe {
+        noor_matmul_f32(
+            a.as_ptr(),
+            b.as_ptr(),
+            c.as_mut_ptr(),
+            m as u32,
+            k as u32,
+            n as u32,
+        );
+        return;
+    }
+
+    #[cfg(not(feature = "zig_kernels"))]
+    {
+        super::tensor::tiled_matmul_fallback(a, b, c, m, k, n);
+    }
+}
+
+/// Dispatch RMSNorm to Zig kernel if available.
+pub fn rmsnorm_dispatch(x: &[f32], w: &[f32], out: &mut [f32], n_vecs: usize, dim: usize, eps: f32) {
+    #[cfg(feature = "zig_kernels")]
+    unsafe {
+        noor_rmsnorm_f32(
+            x.as_ptr(),
+            w.as_ptr(),
+            out.as_mut_ptr(),
+            n_vecs as u32,
+            dim as u32,
+            eps,
+        );
+        return;
+    }
+
+    #[cfg(not(feature = "zig_kernels"))]
+    {
+        // Rust fallback (inline)
+        for v in 0..n_vecs {
+            let offset = v * dim;
+            let mut sum_sq = 0.0f64;
+            for d in 0..dim {
+                let val = x[offset + d] as f64;
+                sum_sq += val * val;
+            }
+            let rms = ((sum_sq / dim as f64) + eps as f64).sqrt();
+            let inv_rms = 1.0 / rms;
+            for d in 0..dim {
+                out[offset + d] = (x[offset + d] as f64 * inv_rms * w[d] as f64) as f32;
+            }
+        }
+    }
+}
+
+/// Dispatch SiLU to Zig kernel if available.
+pub fn silu_dispatch(x: &[f32], out: &mut [f32]) {
+    debug_assert_eq!(x.len(), out.len());
+
+    #[cfg(feature = "zig_kernels")]
+    unsafe {
+        noor_silu_f32(x.as_ptr(), out.as_mut_ptr(), x.len() as u32);
+        return;
+    }
+
+    #[cfg(not(feature = "zig_kernels"))]
+    {
+        for i in 0..x.len() {
+            out[i] = x[i] / (1.0 + (-x[i]).exp());
+        }
+    }
+}
+
+/// Dispatch GELU to Zig kernel if available.
+pub fn gelu_dispatch(x: &[f32], out: &mut [f32]) {
+    debug_assert_eq!(x.len(), out.len());
+
+    #[cfg(feature = "zig_kernels")]
+    unsafe {
+        noor_gelu_f32(x.as_ptr(), out.as_mut_ptr(), x.len() as u32);
+        return;
+    }
+
+    #[cfg(not(feature = "zig_kernels"))]
+    {
+        let sqrt_2_pi = (2.0f32 / std::f32::consts::PI).sqrt();
+        for i in 0..x.len() {
+            let x_val = x[i];
+            let inner = sqrt_2_pi * (x_val + 0.044715 * x_val * x_val * x_val);
+            out[i] = 0.5 * x_val * (1.0 + inner.tanh());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_matmul_dispatch() {
+        let a = vec![1.0f32, 2.0, 3.0, 4.0]; // 2x2
+        let b = vec![5.0f32, 6.0, 7.0, 8.0]; // 2x2
+        let mut c = vec![0.0f32; 4]; // 2x2
+        matmul_dispatch(&a, &b, &mut c, 2, 2, 2);
+        // [1*5+2*7, 1*6+2*8] = [19, 22]
+        // [3*5+4*7, 3*6+4*8] = [43, 50]
+        assert!((c[0] - 19.0).abs() < 1e-4, "c[0]={}", c[0]);
+        assert!((c[1] - 22.0).abs() < 1e-4, "c[1]={}", c[1]);
+        assert!((c[2] - 43.0).abs() < 1e-4, "c[2]={}", c[2]);
+        assert!((c[3] - 50.0).abs() < 1e-4, "c[3]={}", c[3]);
+    }
+
+    #[test]
+    fn test_matmul_dispatch_large() {
+        let m = 64;
+        let k = 32;
+        let n = 48;
+        let a: Vec<f32> = (0..m * k).map(|i| (i as f32) * 0.01).collect();
+        let b: Vec<f32> = (0..k * n).map(|i| (i as f32) * 0.01).collect();
+        let mut c = vec![0.0f32; m * n];
+        matmul_dispatch(&a, &b, &mut c, m, k, n);
+
+        // Spot check with naive
+        let mut expected = 0.0f32;
+        for ki in 0..k {
+            expected += a[0 * k + ki] * b[ki * n + 0];
+        }
+        assert!((c[0] - expected).abs() < 0.1, "c[0]={}, expected={}", c[0], expected);
+    }
+
+    #[test]
+    fn test_silu_dispatch() {
+        let x = vec![0.0f32, 1.0, -1.0, 5.0];
+        let mut out = vec![0.0f32; 4];
+        silu_dispatch(&x, &mut out);
+        assert!((out[0] - 0.0).abs() < 1e-5);
+        assert!(out[1] > 0.7); // silu(1) ≈ 0.731
+        assert!(out[3] > 4.9); // silu(5) ≈ 4.966
+    }
+
+    #[test]
+    fn test_gelu_dispatch() {
+        let x = vec![0.0f32, 1.0, -1.0];
+        let mut out = vec![0.0f32; 3];
+        gelu_dispatch(&x, &mut out);
+        assert!((out[0] - 0.0).abs() < 1e-5);
+        assert!(out[1] > 0.8); // gelu(1) ≈ 0.841
+    }
+
+    #[test]
+    fn test_rmsnorm_dispatch() {
+        let x = vec![1.0f32, 2.0, 3.0, 4.0]; // 2 vectors of dim 2
+        let w = vec![1.0f32, 1.0]; // weight = ones
+        let mut out = vec![0.0f32; 4];
+        rmsnorm_dispatch(&x, &w, &mut out, 2, 2, 1e-6);
+
+        // First vec [1,2]: rms = sqrt((1+4)/2) = sqrt(2.5)
+        // normalized: [1/sqrt(2.5), 2/sqrt(2.5)]
+        let rms1 = (2.5f32).sqrt();
+        assert!((out[0] - 1.0 / rms1).abs() < 0.01);
+        assert!((out[1] - 2.0 / rms1).abs() < 0.01);
+    }
+}

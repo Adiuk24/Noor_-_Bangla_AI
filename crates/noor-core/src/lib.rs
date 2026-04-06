@@ -1,5 +1,6 @@
 pub mod config;
 pub mod tensor;
+pub mod kernels;
 pub mod layers;
 pub mod model;
 pub mod gguf;
