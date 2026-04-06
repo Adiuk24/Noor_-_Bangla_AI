@@ -20,3 +20,4 @@ zig-out/
 kernels/zig/.zig-cache/
 kernels/zig/*.o
 kernels/zig/*.a
+crates/borno/data/corpus/*.txt
