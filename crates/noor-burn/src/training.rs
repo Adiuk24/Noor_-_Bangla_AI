@@ -45,7 +45,11 @@ pub fn train<B: burn::tensor::backend::AutodiffBackend>(
     eprintln!("=== Noor Training (Burn backend) ===");
     eprintln!("  Model: {}", config.model.name);
     eprintln!("  d_model: {}, layers: {}, heads: {}", config.model.d_model, config.model.n_layers, config.model.n_heads);
-    eprintln!("  MoE: {} experts, {} active", config.moe.n_experts, config.moe.n_active_experts);
+    if config.ple.enabled {
+        eprintln!("  PLE: dim={} (no MoE)", config.ple.ple_dim);
+    } else {
+        eprintln!("  MoE: {} experts, {} active", config.moe.n_experts, config.moe.n_active_experts);
+    }
     eprintln!("  Context: {}, Batch: {} seqs ({} tokens)", config.model.context_length, batch_size, config.training.batch_size_tokens);
     eprintln!("  Steps: {}, LR: {} → {}", total_steps, lr_max, lr_min);
 
