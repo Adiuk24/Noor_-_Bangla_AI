@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/noor-core",
     "crates/noor-train",
+    "crates/noor-burn",
     "crates/noor-cli",
     "crates/borno",
 ]
@@ -16,6 +17,8 @@ authors = ["Arif Adito <arif@adioris.com>"]
 [workspace.dependencies]
 noor-core = { path = "crates/noor-core" }
 noor-train = { path = "crates/noor-train" }
+noor-burn = { path = "crates/noor-burn" }
+burn = { version = "0.20", default-features = false }
 borno = { path = "crates/borno" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

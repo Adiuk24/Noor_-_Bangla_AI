@@ -1,0 +1,61 @@
+# Tiny proxy for Burn smoke testing — validates forward+backward+optimizer work
+[model]
+name = "noor-proxy-tiny"
+d_model = 64
+n_layers = 2
+n_heads = 4
+n_kv_heads = 2
+head_dim = 16
+vocab_size = 64000
+context_length = 128
+precision = "f32"
+
+[moe]
+enabled = true
+n_experts = 4
+n_active_experts = 2
+has_shared_expert = true
+expert_ffn_dim = 32
+dense_ffn_dim = 64
+
+[attention]
+sliding_window = 64
+global_every_n = 6
+
+[norm]
+sandwich = true
+eps = 1e-6
+
+[residual]
+use_attnres = false
+attnres_blocks = 2
+
+[ple]
+enabled = false
+ple_dim = 16
+
+[rope]
+theta = 10000.0
+prope_theta = 1000000.0
+prope_fraction = 0.25
+
+[training]
+lr_max = 3e-4
+lr_min = 3e-5
+warmup_steps = 5
+total_steps = 20
+batch_size_tokens = 256
+micro_batch_tokens = 128
+grad_clip = 1.0
+checkpoint_every_steps = 0
+log_every_steps = 1
+
+[optimizer]
+type = "muon"
+beta = 0.9
+qk_clip_tau = 100.0
+
+[smebu]
+kappa = 5.0
+beta = 0.9
+lambda = 0.01

@@ -1,0 +1,27 @@
+[package]
+name = "noor-burn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Noor model + training via Burn framework. GPU-native, autograd, production-grade."
+
+[features]
+default = ["ndarray"]
+cuda = ["burn/cuda", "burn/autodiff", "burn/fusion"]
+wgpu = ["burn/wgpu", "burn/autodiff", "burn/fusion"]
+ndarray = ["burn/ndarray", "burn/autodiff"]
+
+[[bin]]
+name = "noor-train"
+path = "src/bin/noor_train.rs"
+
+[dependencies]
+clap = { workspace = true }
+burn = { workspace = true, features = ["train", "dataset"] }
+borno.workspace = true
+serde.workspace = true
+toml.workspace = true
+memmap2.workspace = true
+rand.workspace = true
+rand_distr.workspace = true
