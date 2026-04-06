@@ -8,7 +8,7 @@ description = "Core tensor library, model layers, and GGUF I/O for Noor"
 
 [features]
 zig_kernels = []
-accelerate = []
+cblas = []      # auto-detected by build.rs: Accelerate on macOS, OpenBLAS on Windows/Linux
 
 [dependencies]
 serde.workspace = true

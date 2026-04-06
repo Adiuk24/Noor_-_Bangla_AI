@@ -1,8 +1,9 @@
 //! FFI bridge to accelerated compute kernels.
-//! Priority: Accelerate BLAS (macOS) > Zig NEON > Rust fallback.
+//! Priority: CBLAS (Accelerate on macOS, OpenBLAS on Windows/Linux) > Zig NEON > Rust fallback.
 
-// Apple Accelerate framework (cblas_sgemm — AMX-optimized on M4)
-#[cfg(feature = "accelerate")]
+// CBLAS — Apple Accelerate on macOS, OpenBLAS on Windows/Linux.
+// Both expose the identical cblas_sgemm symbol and ABI.
+#[cfg(feature = "cblas")]
 extern "C" {
     /// cblas_sgemm: C = alpha * A @ B + beta * C
     /// CblasRowMajor=101, CblasNoTrans=111
@@ -49,11 +50,11 @@ extern "C" {
     pub fn noor_zero_f32(ptr: *mut f32, len: u32);
 }
 
-/// Dispatch matmul. Priority: Accelerate BLAS > Zig NEON > Rust tiled.
+/// Dispatch matmul. Priority: CBLAS (Accelerate/OpenBLAS) > Zig NEON > Rust tiled.
 pub fn matmul_dispatch(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize) {
-    #[cfg(feature = "accelerate")]
+    #[cfg(feature = "cblas")]
     {
-        // Apple Accelerate uses AMX coprocessor on M4 — fastest path
+        // Accelerate (AMX on M4) or OpenBLAS (AVX-512 on i7-14700K) — fastest path
         unsafe {
             cblas_sgemm(
                 101,  // CblasRowMajor
@@ -70,7 +71,7 @@ pub fn matmul_dispatch(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, 
         return;
     }
 
-    #[cfg(all(feature = "zig_kernels", not(feature = "accelerate")))]
+    #[cfg(all(feature = "zig_kernels", not(feature = "cblas")))]
     unsafe {
         noor_matmul_f32(
             a.as_ptr(),
@@ -83,7 +84,7 @@ pub fn matmul_dispatch(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, 
         return;
     }
 
-    #[cfg(not(any(feature = "accelerate", feature = "zig_kernels")))]
+    #[cfg(not(any(feature = "cblas", feature = "zig_kernels")))]
     {
         super::tensor::tiled_matmul_fallback(a, b, c, m, k, n);
     }
