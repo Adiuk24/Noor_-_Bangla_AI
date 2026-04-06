@@ -16,6 +16,10 @@ ndarray = ["burn/ndarray", "burn/autodiff"]
 name = "noor-train"
 path = "src/bin/noor_train.rs"
 
+[[bin]]
+name = "noor-infer"
+path = "src/bin/noor_infer.rs"
+
 [dependencies]
 clap = { workspace = true }
 burn = { workspace = true, features = ["train", "dataset"] }
