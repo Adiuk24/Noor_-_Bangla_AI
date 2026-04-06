@@ -4,6 +4,7 @@ members = [
     "crates/noor-core",
     "crates/noor-train",
     "crates/noor-cli",
+    "crates/borno",
 ]
 
 [workspace.package]
@@ -15,6 +16,7 @@ authors = ["Arif Adito <arif@adioris.com>"]
 [workspace.dependencies]
 noor-core = { path = "crates/noor-core" }
 noor-train = { path = "crates/noor-train" }
+borno = { path = "crates/borno" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 clap = { version = "4", features = ["derive"] }

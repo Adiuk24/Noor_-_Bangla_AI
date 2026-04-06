@@ -1,0 +1,30 @@
+[package]
+name = "borno"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Borno (বর্ণ) — 64K BPE tokenizer for Noor. Bangla-native, English+code, rs-bpe backtracking."
+
+[[bin]]
+name = "borno-train"
+path = "src/bin/borno_train.rs"
+required-features = ["train"]
+
+[features]
+train = ["tokenizers", "reqwest", "dep:clap", "dep:indicatif"]
+rand = ["bpe/rand"]
+
+[dependencies]
+bpe = "0.2"
+unicode-normalization = "0.1"
+unicode-segmentation = "1"
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+clap = { version = "4", features = ["derive"], optional = true }
+tokenizers = { version = "0.22", optional = true }
+reqwest = { version = "0.12", features = ["blocking"], optional = true }
+indicatif = { version = "0.17", optional = true }
+
+[dev-dependencies]
+approx = "0.5"
