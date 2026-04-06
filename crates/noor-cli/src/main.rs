@@ -67,7 +67,7 @@ enum Commands {
         #[arg(short, long)]
         output: String,
         /// Vocab size for byte-level tokenizer
-        #[arg(long, default_value = "32000")]
+        #[arg(long, default_value = "64000")]
         vocab_size: usize,
         /// Tokens per shard
         #[arg(long, default_value = "100000")]
@@ -82,7 +82,7 @@ enum Commands {
         #[arg(short, long)]
         output: String,
         /// Vocab size
-        #[arg(long, default_value = "32000")]
+        #[arg(long, default_value = "64000")]
         vocab_size: usize,
         /// Total number of tokens to generate
         #[arg(long, default_value = "100000")]

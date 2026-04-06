@@ -66,8 +66,8 @@ mod tests {
 
     #[test]
     fn test_embedding_dimensions() {
-        let emb = Embedding::new(32000, 768, 0.02);
-        assert_eq!(emb.vocab_size(), 32000);
+        let emb = Embedding::new(64000, 768, 0.02);
+        assert_eq!(emb.vocab_size(), 64000);
         assert_eq!(emb.d_model(), 768);
     }
 }

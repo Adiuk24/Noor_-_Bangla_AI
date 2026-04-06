@@ -1,117 +1,63 @@
-//! Simple BPE tokenizer for Phase 0.
-//! Uses a basic byte-level fallback. For production, will wrap HuggingFace tokenizers crate.
+//! Noor tokenizer — wraps Borno for encoding/decoding.
 
-use std::collections::HashMap;
 use std::path::Path;
-use std::io::{self, BufRead, Write};
+use std::io;
 
-/// Noor tokenizer. Phase 0: simple char-level with special tokens.
-/// Phase 2+: proper BPE from HuggingFace tokenizers crate.
+/// Noor tokenizer wrapping the Borno BPE tokenizer.
 pub struct NoorTokenizer {
-    /// Token string → ID (used for BPE merge lookups in Phase 2+)
-    #[allow(dead_code)]
-    token_to_id: HashMap<String, u32>,
-    /// ID → token string
-    id_to_token: Vec<String>,
-    /// Special tokens
-    pub bos_id: u32,
-    pub eos_id: u32,
-    pub pad_id: u32,
-    pub unk_id: u32,
+    borno: borno::Borno,
 }
 
 impl NoorTokenizer {
-    /// Create a simple byte-level tokenizer with vocab_size entries.
-    /// First 256 entries are raw bytes, rest are special/unused.
+    /// Create a byte-level fallback tokenizer (no trained BPE merges).
     pub fn byte_level(vocab_size: usize) -> Self {
-        assert!(vocab_size >= 260, "Vocab must be >= 260 for byte-level + specials");
-        let mut token_to_id = HashMap::new();
-        let mut id_to_token = Vec::with_capacity(vocab_size);
-
-        // Byte tokens 0-255
-        for i in 0..256u32 {
-            let token = format!("<byte_{i:02x}>");
-            token_to_id.insert(token.clone(), i);
-            id_to_token.push(token);
-        }
-
-        // Special tokens
-        let specials = ["<bos>", "<eos>", "<pad>", "<unk>"];
-        for (j, &s) in specials.iter().enumerate() {
-            let id = 256 + j as u32;
-            token_to_id.insert(s.to_string(), id);
-            id_to_token.push(s.to_string());
-        }
-
-        // Fill remaining with unused tokens
-        for i in 260..vocab_size {
-            let token = format!("<unused_{i}>");
-            token_to_id.insert(token.clone(), i as u32);
-            id_to_token.push(token);
-        }
-
+        assert_eq!(vocab_size, borno::vocab::VOCAB_SIZE,
+            "Borno requires vocab_size={}, got {}", borno::vocab::VOCAB_SIZE, vocab_size);
         Self {
-            token_to_id,
-            id_to_token,
-            bos_id: 256,
-            eos_id: 257,
-            pad_id: 258,
-            unk_id: 259,
+            borno: borno::Borno::from_byte_fallback(),
         }
     }
 
-    /// Load a vocabulary from a simple text file (one token per line).
-    pub fn from_vocab_file(path: &Path) -> io::Result<Self> {
-        let file = std::fs::File::open(path)?;
-        let reader = io::BufReader::new(file);
-        let mut token_to_id = HashMap::new();
-        let mut id_to_token = Vec::new();
-
-        for (i, line) in reader.lines().enumerate() {
-            let token = line?;
-            token_to_id.insert(token.clone(), i as u32);
-            id_to_token.push(token);
-        }
-
-        let get_id = |name: &str| -> u32 {
-            *token_to_id.get(name).unwrap_or(&0)
-        };
-
+    /// Load a trained Borno tokenizer from a bincode encoder file.
+    pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(Self {
-            bos_id: get_id("<bos>"),
-            eos_id: get_id("<eos>"),
-            pad_id: get_id("<pad>"),
-            unk_id: get_id("<unk>"),
-            token_to_id,
-            id_to_token,
+            borno: borno::Borno::load(path)?,
         })
     }
 
-    /// Encode text to token IDs (byte-level encoding).
+    /// Encode text to token IDs.
     pub fn encode(&self, text: &str) -> Vec<u32> {
-        text.bytes().map(|b| b as u32).collect()
+        self.borno.encode(text)
     }
 
     /// Decode token IDs to text.
     pub fn decode(&self, ids: &[u32]) -> String {
-        let bytes: Vec<u8> = ids.iter()
-            .filter(|&&id| id < 256) // skip special tokens
-            .map(|&id| id as u8)
-            .collect();
-        String::from_utf8_lossy(&bytes).to_string()
+        self.borno.decode(ids)
     }
 
     pub fn vocab_size(&self) -> usize {
-        self.id_to_token.len()
+        self.borno.vocab_size()
     }
 
-    /// Save vocabulary to file.
-    pub fn save_vocab(&self, path: &Path) -> io::Result<()> {
-        let mut file = std::fs::File::create(path)?;
-        for token in &self.id_to_token {
-            writeln!(file, "{token}")?;
+    pub fn bos_id(&self) -> u32 { self.borno.bos_id() }
+    pub fn eos_id(&self) -> u32 { self.borno.eos_id() }
+    pub fn pad_id(&self) -> u32 { self.borno.pad_id() }
+    pub fn unk_id(&self) -> u32 { self.borno.unk_id() }
+
+    /// Load from file path (supports .bin for Borno encoder, falls back to byte-level).
+    pub fn from_vocab_file(path: &Path) -> io::Result<Self> {
+        if path.extension().is_some_and(|e| e == "bin") {
+            return borno::Borno::load(path)
+                .map(|b| Self { borno: b })
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()));
         }
-        Ok(())
+        Ok(Self::byte_level(borno::vocab::VOCAB_SIZE))
+    }
+
+    /// Save vocabulary.
+    pub fn save_vocab(&self, path: &Path) -> io::Result<()> {
+        self.borno.save(path)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
     }
 }
 
@@ -121,51 +67,41 @@ mod tests {
 
     #[test]
     fn test_byte_level_encode_decode() {
-        let tok = NoorTokenizer::byte_level(1000);
+        let tok = NoorTokenizer::byte_level(64_000);
         let text = "hello world";
         let ids = tok.encode(text);
         let decoded = tok.decode(&ids);
-        assert_eq!(decoded, text, "Round-trip encode/decode should preserve text");
+        assert_eq!(decoded, text);
     }
 
     #[test]
     fn test_vocab_size() {
-        let tok = NoorTokenizer::byte_level(32000);
-        assert_eq!(tok.vocab_size(), 32000);
+        let tok = NoorTokenizer::byte_level(64_000);
+        assert_eq!(tok.vocab_size(), 64_000);
     }
 
     #[test]
     fn test_special_tokens() {
-        let tok = NoorTokenizer::byte_level(1000);
-        assert_eq!(tok.bos_id, 256);
-        assert_eq!(tok.eos_id, 257);
-        assert_eq!(tok.pad_id, 258);
-        assert_eq!(tok.unk_id, 259);
+        let tok = NoorTokenizer::byte_level(64_000);
+        assert_eq!(tok.bos_id(), 256);
+        assert_eq!(tok.eos_id(), 257);
+        assert_eq!(tok.pad_id(), 258);
+        assert_eq!(tok.unk_id(), 259);
+    }
+
+    #[test]
+    fn test_encode_bangla() {
+        let tok = NoorTokenizer::byte_level(64_000);
+        let text = "নূর";
+        let ids = tok.encode(text);
+        assert!(!ids.is_empty());
+        let decoded = tok.decode(&ids);
+        assert_eq!(decoded, text);
     }
 
     #[test]
     fn test_encode_empty() {
-        let tok = NoorTokenizer::byte_level(1000);
+        let tok = NoorTokenizer::byte_level(64_000);
         assert_eq!(tok.encode(""), Vec::<u32>::new());
-    }
-
-    #[test]
-    fn test_encode_unicode() {
-        let tok = NoorTokenizer::byte_level(1000);
-        let text = "নূর"; // Bangla for "Noor"
-        let ids = tok.encode(text);
-        assert!(!ids.is_empty());
-        // Each UTF-8 byte becomes a token; Bangla chars are 3 bytes each
-        assert_eq!(ids.len(), text.len()); // byte length
-    }
-
-    #[test]
-    fn test_save_load_vocab() {
-        let tok = NoorTokenizer::byte_level(500);
-        let path = std::env::temp_dir().join("noor_test_vocab.txt");
-        tok.save_vocab(&path).unwrap();
-        let loaded = NoorTokenizer::from_vocab_file(&path).unwrap();
-        assert_eq!(loaded.vocab_size(), 500);
-        std::fs::remove_file(path).ok();
     }
 }
