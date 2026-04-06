@@ -1,6 +1,21 @@
-//! FFI bridge to Zig NEON kernels.
-//! When compiled with `zig_kernels` feature, uses Zig.
-//! Otherwise falls back to pure Rust implementations.
+//! FFI bridge to accelerated compute kernels.
+//! Priority: Accelerate BLAS (macOS) > Zig NEON > Rust fallback.
+
+// Apple Accelerate framework (cblas_sgemm — AMX-optimized on M4)
+#[cfg(feature = "accelerate")]
+extern "C" {
+    /// cblas_sgemm: C = alpha * A @ B + beta * C
+    /// CblasRowMajor=101, CblasNoTrans=111
+    fn cblas_sgemm(
+        order: i32, trans_a: i32, trans_b: i32,
+        m: i32, n: i32, k: i32,
+        alpha: f32,
+        a: *const f32, lda: i32,
+        b: *const f32, ldb: i32,
+        beta: f32,
+        c: *mut f32, ldc: i32,
+    );
+}
 
 #[cfg(feature = "zig_kernels")]
 extern "C" {
@@ -34,9 +49,28 @@ extern "C" {
     pub fn noor_zero_f32(ptr: *mut f32, len: u32);
 }
 
-/// Dispatch matmul to Zig kernel if available, Rust fallback otherwise.
+/// Dispatch matmul. Priority: Accelerate BLAS > Zig NEON > Rust tiled.
 pub fn matmul_dispatch(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize) {
-    #[cfg(feature = "zig_kernels")]
+    #[cfg(feature = "accelerate")]
+    {
+        // Apple Accelerate uses AMX coprocessor on M4 — fastest path
+        unsafe {
+            cblas_sgemm(
+                101,  // CblasRowMajor
+                111,  // CblasNoTrans
+                111,  // CblasNoTrans
+                m as i32, n as i32, k as i32,
+                1.0,  // alpha
+                a.as_ptr(), k as i32,
+                b.as_ptr(), n as i32,
+                0.0,  // beta (overwrite C, don't accumulate)
+                c.as_mut_ptr(), n as i32,
+            );
+        }
+        return;
+    }
+
+    #[cfg(all(feature = "zig_kernels", not(feature = "accelerate")))]
     unsafe {
         noor_matmul_f32(
             a.as_ptr(),
@@ -49,7 +83,7 @@ pub fn matmul_dispatch(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, 
         return;
     }
 
-    #[cfg(not(feature = "zig_kernels"))]
+    #[cfg(not(any(feature = "accelerate", feature = "zig_kernels")))]
     {
         super::tensor::tiled_matmul_fallback(a, b, c, m, k, n);
     }
