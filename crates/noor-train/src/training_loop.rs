@@ -341,6 +341,9 @@ pub fn train(
                 metrics.max_attn_logit, metrics.tokens_per_sec, metrics.active_experts,
                 if metrics.qk_clipped { "| QK-CLIPPED" } else { "" }
             );
+            // Force flush so logs appear in real-time when piped
+            use std::io::Write;
+            let _ = std::io::stderr().flush();
         }
 
         all_metrics.push(metrics);

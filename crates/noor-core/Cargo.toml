@@ -20,7 +20,7 @@ toml.workspace = true
 rand.workspace = true
 rand_distr.workspace = true
 borno.workspace = true
-cudarc = { version = "0.19", optional = true, features = ["cublas"] }
+cudarc = { version = "0.19", optional = true, features = ["cublas", "cuda-12060"] }
 
 [dev-dependencies]
 approx = "0.5"
