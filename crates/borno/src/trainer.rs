@@ -80,26 +80,67 @@ pub fn train_bpe(
     Ok(())
 }
 
+/// Build the GPT-2 ByteLevel char-to-byte reverse mapping.
+/// The HF ByteLevel pre-tokenizer maps each byte (0-255) to a unicode char.
+/// This function builds the reverse: char -> byte.
+fn build_char_to_byte_map() -> std::collections::HashMap<char, u8> {
+    let mut bs: Vec<u8> = Vec::new();
+    bs.extend(b'!'..=b'~');
+    bs.extend(0xA1u8..=0xACu8);
+    bs.extend(0xAEu8..=0xFFu8);
+
+    let mut cs: Vec<u32> = bs.iter().map(|&b| b as u32).collect();
+    let mut n: u32 = 0;
+
+    for b in 0u8..=255 {
+        if !bs.contains(&b) {
+            bs.push(b);
+            cs.push(256 + n);
+            n += 1;
+        }
+    }
+
+    cs.into_iter()
+        .zip(bs)
+        .map(|(c, b)| (char::from_u32(c).unwrap(), b))
+        .collect()
+}
+
+/// Convert a HuggingFace ByteLevel token string back to raw bytes.
+fn hf_token_to_bytes(token: &str, char_to_byte: &std::collections::HashMap<char, u8>) -> Vec<u8> {
+    token.chars().map(|c| char_to_byte.get(&c).copied().unwrap_or(c as u8)).collect()
+}
+
 /// Load a trained HuggingFace tokenizer and extract an ordered token list
 /// suitable for constructing a `BytePairEncoding` via `from_dictionary`.
 ///
-/// Returns tokens ordered by their ID (ascending).
+/// Returns only BPE-encodable tokens (byte fallback + learned merges) as raw
+/// byte sequences, ordered by merge priority. Special tokens are excluded
+/// since they're handled externally by `BornoEncoder`.
 pub fn load_trained_vocab(
     tokenizer_path: &Path,
 ) -> Result<Vec<Vec<u8>>, Box<dyn std::error::Error>> {
     let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path)
         .map_err(|e| format!("Failed to load tokenizer: {e}"))?;
 
+    let char_to_byte = build_char_to_byte_map();
     let vocab = tokenizer.get_vocab(true);
-    let vocab_size = tokenizer.get_vocab_size(true);
 
-    // Sort tokens by ID to get an ordered list.
+    // Collect special token strings to filter them out.
+    let special_set: std::collections::HashSet<&str> =
+        vocab::SPECIAL_TOKENS.iter().copied().collect();
+
+    // Sort tokens by ID to get merge-priority order.
     let mut pairs: Vec<(String, u32)> = vocab.into_iter().collect();
     pairs.sort_by_key(|(_tok, id)| *id);
 
-    let mut tokens: Vec<Vec<u8>> = Vec::with_capacity(vocab_size);
-    for (tok_str, _id) in pairs {
-        tokens.push(tok_str.into_bytes());
+    // Convert HF ByteLevel unicode tokens to raw bytes, skipping specials.
+    let mut tokens: Vec<Vec<u8>> = Vec::new();
+    for (tok_str, _id) in &pairs {
+        if special_set.contains(tok_str.as_str()) {
+            continue;
+        }
+        tokens.push(hf_token_to_bytes(tok_str, &char_to_byte));
     }
 
     Ok(tokens)

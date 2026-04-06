@@ -1,0 +1,6 @@
+# Large corpus files — don't commit
+*.xz
+*.bin
+# Keep trained vocab files (small)
+!*.json
+!*.txt
