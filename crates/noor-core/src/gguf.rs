@@ -381,36 +381,8 @@ fn align_offset(offset: u64, alignment: u64) -> u64 {
     (offset + alignment - 1) / alignment * alignment
 }
 
-fn f16_to_f32(bits: u16) -> f32 {
-    let sign = ((bits >> 15) & 1) as u32;
-    let exp = ((bits >> 10) & 0x1F) as u32;
-    let mantissa = (bits & 0x3FF) as u32;
-
-    if exp == 0 {
-        // Subnormal or zero
-        if mantissa == 0 {
-            return f32::from_bits(sign << 31);
-        }
-        // Subnormal f16 → normal f32
-        let mut m = mantissa;
-        let mut e: i32 = -14;
-        while m & 0x400 == 0 {
-            m <<= 1;
-            e -= 1;
-        }
-        m &= 0x3FF;
-        let f32_exp = ((e + 127) as u32) & 0xFF;
-        return f32::from_bits((sign << 31) | (f32_exp << 23) | (m << 13));
-    }
-    if exp == 31 {
-        // Inf or NaN
-        let f32_mantissa = mantissa << 13;
-        return f32::from_bits((sign << 31) | (0xFF << 23) | f32_mantissa);
-    }
-    // Normal
-    let f32_exp = (exp as i32 - 15 + 127) as u32;
-    f32::from_bits((sign << 31) | (f32_exp << 23) | (mantissa << 13))
-}
+// f16_to_f32 is now in crate::tensor
+use crate::tensor::f16_to_f32;
 
 #[cfg(test)]
 mod tests {
