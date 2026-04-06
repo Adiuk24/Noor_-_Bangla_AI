@@ -818,6 +818,162 @@ Every step has: **input** (what must exist before starting), **action** (exactly
 
 ---
 
+## PHASE 5: NoorCodec — Speech Tokenizer
+
+### Step 5.1 — NoorCodec Architecture (Rust + Zig)
+
+**Input:** Phase 4 complete (or can run in parallel from Phase 3).
+
+**Action:**
+1. Create `crates/noor-codec/` — speech codec crate
+2. Implement Conv1d layers (forward + backward) in Rust
+3. Implement Residual Vector Quantizer (8 codebooks × 1024 entries)
+4. Implement encoder: PCM → Conv1d stack → RVQ → discrete tokens
+5. Implement decoder: tokens → RVQ lookup → TransposedConv1d → PCM
+6. Total: ~10M parameters
+7. Add Zig NEON kernels for Conv1d hot path (ARM)
+
+**Output:** Working codec that converts audio ↔ discrete tokens.
+
+**Test:** Encode 5s of audio → decode → PESQ > 3.0 (basic quality). Round-trip preserves intelligibility.
+
+---
+
+### Step 5.2 — Train NoorCodec on Bangla + English Speech
+
+**Input:** Step 5.1 complete.
+
+**Action:**
+1. Download Common Voice Bangla (~200 hours, CC-0) + English subset (~800 hours)
+2. Preprocess: 16kHz mono PCM, normalize volume
+3. Train codec with reconstruction loss + codebook commitment loss
+4. Train on RTX 3060 (~10M params, ~8 hours)
+5. Validate: PESQ > 3.5, STOI > 0.9 on held-out test set
+6. Export to GGUF format
+
+**Output:** Trained NoorCodec that tokenizes Bangla+English speech.
+
+**Test:** Encode Bangla speech → decode → native speaker confirms intelligibility. Same for English.
+
+---
+
+### Step 5.3 — Codec Token Integration Script
+
+**Input:** Step 5.2 complete.
+
+**Action:**
+1. Build preprocessing tool: takes audio files, runs NoorCodec encoder, outputs token sequences
+2. Format: same binary shard format as text data (`[seq_len][token_ids]`)
+3. Token IDs offset by 64000 (speech token space)
+4. Process ~1000 hours of speech → binary shards
+
+**Output:** Speech data in same format as text training data, ready for interleaved training.
+
+---
+
+## PHASE 6: NoorVoice — Multimodal Training
+
+### Step 6.1 — Expand Borno Vocabulary to 72K
+
+**Input:** Trained text model (Phase 3) + trained NoorCodec (Phase 5).
+
+**Action:**
+1. Update Borno vocab from 64K → 72,256 (add 8,256 speech tokens)
+2. Add special tokens: `<audio_start>`, `<audio_end>`, `<cb0>`-`<cb7>`
+3. Expand model embedding table: initialize new speech embeddings from small random noise
+4. Expand output projection: same expansion
+5. Save as new GGUF checkpoint
+
+**Output:** Noor model with 72K vocab, ready for multimodal training.
+
+**Test:** Forward pass with text tokens still produces same logits as before expansion (text weights unchanged).
+
+---
+
+### Step 6.2 — Alignment Training (Speech ↔ Text)
+
+**Input:** Step 6.1 complete.
+
+**Action:**
+1. Freeze all transformer weights (attention, FFN, MoE, norms)
+2. Train only: speech embeddings + speech output projection
+3. Training data: interleaved text+speech sequences
+   ```
+   <user><audio_start>[codec tokens]<audio_end>
+   <assistant>Text response here.
+   ```
+4. Model learns mapping between speech tokens and text meaning
+5. ~500M tokens, ~1 week on RTX 3060
+
+**Exit Criteria:**
+- [ ] Model can transcribe speech tokens to text (implicit ASR)
+- [ ] Speech embeddings cluster by phoneme/word
+- [ ] Text generation quality unchanged (frozen weights)
+
+---
+
+### Step 6.3 — End-to-End Voice Fine-tuning
+
+**Input:** Step 6.2 complete.
+
+**Action:**
+1. Unfreeze ALL weights
+2. Train on conversational speech data (paired audio dialogues)
+3. Include Bangla conversational data specifically
+4. ~200M tokens, ~3 days on RTX 3060
+5. Token budget: 2048 max per response (prevent verbosity)
+
+**Exit Criteria:**
+- [ ] Given audio input, model generates audio output tokens
+- [ ] Generated speech is intelligible when decoded by NoorCodec
+- [ ] Bangla speech quality: native speaker rates > 3/5
+- [ ] English speech quality: > 3/5
+- [ ] Text capability not degraded (eval on MMLU, GSM8K)
+
+---
+
+## PHASE 7: Voice + Agent
+
+### Step 7.1 — Voice-Native Tool Calling
+
+**Input:** Phase 6 complete + NSTE self-training (Phase 3.3).
+
+**Action:**
+1. Train on voice → tool call → voice response sequences:
+   ```
+   <user><audio_start>[bangla: "আমার bKash ব্যালেন্স কত?"]<audio_end>
+   <assistant><tool_call>bkash_check_balance(phone="01712345678")</tool_call>
+   <tool_result>{"balance": 5230.50}</tool_result>
+   <assistant><audio_start>[bangla: "আপনার ব্যালেন্স পাঁচ হাজার দুইশত ত্রিশ টাকা পঞ্চাশ পয়সা"]<audio_end>
+   ```
+2. NSTE self-training with voice tasks
+3. Competence map tracks voice-specific categories
+
+**Output:** Noor that hears a question, calls tools, speaks the answer.
+
+---
+
+### Step 7.2 — Streaming Voice Inference
+
+**Input:** Step 7.1 complete.
+
+**Action:**
+1. Implement streaming codec decode (generate audio as tokens are produced)
+2. VAD (Voice Activity Detection) for barge-in
+3. Ring buffer for audio I/O
+4. Target: <50ms mouth-to-ear latency on-device
+
+**Output:** Real-time voice conversations with Noor.
+
+**Final Voice Exit Criteria:**
+- [ ] Voice in → voice out, single model, single binary
+- [ ] Bangla voice quality > 4/5 (native speaker rating)
+- [ ] Tool calling via voice works
+- [ ] On-device latency < 100ms (phone), < 50ms (laptop)
+- [ ] No ASR, no TTS, no pipeline — one forward pass
+
+---
+
 ## Rules for AI Agents
 
 1. **Never skip a step.** Every step has a test. Pass the test before moving on.
