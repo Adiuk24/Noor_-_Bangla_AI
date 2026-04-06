@@ -26,21 +26,38 @@ fn main() {
         }
     }
 
-    // Zig NEON kernels (optional — for activations, norms on ARM)
-    let kernel_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap()
-        .join("kernels/zig");
+    // Zig NEON kernels (optional — ARM only, skip on x86_64)
+    #[cfg(target_arch = "aarch64")]
+    {
+        let kernel_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent().unwrap()
+            .parent().unwrap()
+            .join("kernels/zig");
 
-    let lib_path = kernel_dir.join("libmatmul.a");
+        let lib_path = kernel_dir.join("libmatmul.a");
 
-    if lib_path.exists() {
-        println!("cargo:rustc-link-search=native={}", kernel_dir.display());
-        println!("cargo:rustc-link-lib=static=matmul");
-        println!("cargo:rustc-cfg=feature=\"zig_kernels\"");
-        println!("cargo:warning=Zig NEON kernels enabled");
+        if lib_path.exists() {
+            println!("cargo:rustc-link-search=native={}", kernel_dir.display());
+            println!("cargo:rustc-link-lib=static=matmul");
+            println!("cargo:rustc-cfg=feature=\"zig_kernels\"");
+            println!("cargo:warning=Zig NEON kernels enabled");
+        }
+
+        println!("cargo:rerun-if-changed={}", lib_path.display());
     }
-
-    println!("cargo:rerun-if-changed={}", lib_path.display());
     println!("cargo:rerun-if-env-changed=OPENBLAS_PATH");
+
+    // CUDA detection (Windows / Linux only — macOS has no NVCC toolchain).
+    // The `cuda` feature is opt-in; build.rs just emits a helpful warning when
+    // CUDA_PATH is present so the user knows they can enable it.
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Ok(cuda_path) = std::env::var("CUDA_PATH") {
+            println!(
+                "cargo:warning=CUDA detected at {} — enable with --features cuda",
+                cuda_path
+            );
+        }
+    }
+    println!("cargo:rerun-if-env-changed=CUDA_PATH");
 }

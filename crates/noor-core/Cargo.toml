@@ -9,9 +9,10 @@ description = "Core tensor library, model layers, and GGUF I/O for Noor"
 [features]
 zig_kernels = []
 cblas = []      # auto-detected by build.rs: Accelerate on macOS, OpenBLAS on Windows/Linux
+cuda = ["dep:cudarc"]   # optional: NVIDIA GPU via cuBLAS (RTX 3060 / any CUDA device)
 
 [lints.rust]
-unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("cblas", "zig_kernels", "accelerate"))'] }
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("cblas", "zig_kernels", "accelerate", "cuda"))'] }
 
 [dependencies]
 serde.workspace = true
@@ -19,6 +20,7 @@ toml.workspace = true
 rand.workspace = true
 rand_distr.workspace = true
 borno.workspace = true
+cudarc = { version = "0.19", optional = true, features = ["cublas"] }
 
 [dev-dependencies]
 approx = "0.5"

@@ -1,5 +1,5 @@
 //! FFI bridge to accelerated compute kernels.
-//! Priority: CBLAS (Accelerate on macOS, OpenBLAS on Windows/Linux) > Zig NEON > Rust fallback.
+//! Priority: CUDA (cuBLAS) > CBLAS (Accelerate on macOS, OpenBLAS on Windows/Linux) > Zig NEON > Rust fallback.
 
 // CBLAS — Apple Accelerate on macOS, OpenBLAS on Windows/Linux.
 // Both expose the identical cblas_sgemm symbol and ABI.
@@ -50,8 +50,101 @@ extern "C" {
     pub fn noor_zero_f32(ptr: *mut f32, len: u32);
 }
 
-/// Dispatch matmul. Priority: CBLAS (Accelerate/OpenBLAS) > Zig NEON > Rust tiled.
+// ── CUDA / cuBLAS backend (optional, enabled with --features cuda) ──────────
+//
+// cuBLAS uses column-major storage, but our tensors are row-major.
+// The standard trick to compute C = A @ B with row-major data via a
+// column-major BLAS:
+//
+//   cuBLAS sees the *transpose* of each matrix.
+//   So feed it:  C^T = B^T @ A^T
+//   i.e. swap A↔B and swap m↔n, keep k the same, leave both ops as OP_N.
+//
+// This is the same trick used by PyTorch / cuDNN / CUTLASS for row-major GEMM.
+#[cfg(feature = "cuda")]
+mod cuda_backend {
+    use std::sync::{Arc, OnceLock};
+
+    use cudarc::cublas::safe::{CudaBlas, GemmConfig};
+    use cudarc::cublas::sys::cublasOperation_t;
+    use cudarc::driver::{CudaContext, CudaStream};
+
+    /// Lazily-initialised (device, stream, blas) triple.
+    /// The stream is stored as Arc so it can be shared between the blas handle
+    /// and ad-hoc htod/dtoh copies executed on the same stream.
+    struct CudaState {
+        stream: Arc<CudaStream>,
+        blas: CudaBlas,
+    }
+
+    static CUDA_STATE: OnceLock<CudaState> = OnceLock::new();
+
+    fn get_state() -> &'static CudaState {
+        CUDA_STATE.get_or_init(|| {
+            let ctx = CudaContext::new(0).expect("Failed to initialise CUDA device 0");
+            let stream = ctx.default_stream();
+            let blas = CudaBlas::new(stream.clone())
+                .expect("Failed to create cuBLAS handle");
+            CudaState { stream, blas }
+        })
+    }
+
+    /// Compute C (m×n) = A (m×k) @ B (k×n), all row-major, via cuBLAS.
+    pub fn matmul_cuda(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize) {
+        let state = get_state();
+        let stream = &state.stream;
+
+        // Copy inputs to device memory on the same stream.
+        let a_dev = stream.memcpy_stod(a).expect("htod copy of A failed");
+        let b_dev = stream.memcpy_stod(b).expect("htod copy of B failed");
+        let mut c_dev = stream
+            .alloc_zeros::<f32>(m * n)
+            .expect("CUDA alloc for C failed");
+
+        // cuBLAS GEMM: C^T = B^T @ A^T  (swapped A/B and m/n → row-major result)
+        //
+        //  GemmConfig { transa, transb, m, n, k, alpha, lda, ldb, beta, ldc }
+        //
+        //  We call sgemm(OP_N, OP_N, n, m, k, 1.0, B, n, A, k, 0.0, C, n)
+        //  which performs:  C (n×m col-major) = B (n×k col-major) @ A (k×m col-major)
+        //  Interpreted as row-major: C (m×n) = A (m×k) @ B (k×n)  ✓
+        let cfg = GemmConfig {
+            transa: cublasOperation_t::CUBLAS_OP_N,
+            transb: cublasOperation_t::CUBLAS_OP_N,
+            m: n as i32,   // leading dim of B^T / C (= n in row-major speak)
+            n: m as i32,   // rows of A^T (= m in row-major speak)
+            k: k as i32,
+            alpha: 1.0f32,
+            lda: n as i32, // leading dim of B (row-major B has n cols → lda=n)
+            ldb: k as i32, // leading dim of A (row-major A has k cols → ldb=k)
+            beta: 0.0f32,
+            ldc: n as i32, // leading dim of C (row-major C has n cols → ldc=n)
+        };
+
+        unsafe {
+            use cudarc::cublas::safe::Gemm;
+            state
+                .blas
+                .gemm(cfg, &b_dev, &a_dev, &mut c_dev)
+                .expect("cuBLAS sgemm failed");
+        }
+
+        // Copy result back to host (synchronises the stream).
+        let result = stream
+            .memcpy_dtov(&c_dev)
+            .expect("dtoh copy of C failed");
+        c.copy_from_slice(&result);
+    }
+}
+
+/// Dispatch matmul. Priority: CUDA (cuBLAS) > CBLAS (Accelerate/OpenBLAS) > Zig NEON > Rust tiled.
 pub fn matmul_dispatch(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize) {
+    #[cfg(feature = "cuda")]
+    {
+        cuda_backend::matmul_cuda(a, b, c, m, k, n);
+        return;
+    }
+
     #[cfg(feature = "cblas")]
     {
         // Accelerate (AMX on M4) or OpenBLAS (AVX-512 on i7-14700K) — fastest path
