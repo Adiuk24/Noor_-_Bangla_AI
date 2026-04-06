@@ -206,6 +206,77 @@ impl NoorModel {
         }
     }
 
+    /// Forward pass with activation caching for backward.
+    /// Returns (ModelOutput, ForwardCache).
+    pub fn forward_with_cache(
+        &mut self,
+        token_ids: &[u32],
+    ) -> (ModelOutput, crate::forward_cache::ForwardCache) {
+        let nl = self.blocks.len();
+        let mut fwd_cache = crate::forward_cache::ForwardCache::new(nl);
+        fwd_cache.token_ids = token_ids.to_vec();
+
+        // Token embedding
+        let mut h = self.embedding.forward(token_ids);
+        fwd_cache.embedding_out = h.clone();
+
+        let mut new_caches = Vec::with_capacity(nl);
+        let mut max_logit = f32::NEG_INFINITY;
+        let mut expert_util = Vec::new();
+
+        for (i, block) in self.blocks.iter_mut().enumerate() {
+            // Cache block input
+            fwd_cache.block_caches[i].input = h.clone();
+
+            let is_global = match block {
+                Block::MoE(b) => b.is_global,
+                Block::PLE(_) => false,
+            };
+            let rope = if is_global {
+                self.prope.as_ref().unwrap_or(&self.rope)
+            } else {
+                &self.rope
+            };
+
+            let kv = KVCache::empty(self.config.model.n_kv_heads, self.config.model.head_dim);
+            let out = block.forward(&h, rope, Some(kv));
+
+            if out.max_attn_logit > max_logit {
+                max_logit = out.max_attn_logit;
+            }
+
+            if let Block::MoE(moe_block) = block {
+                expert_util.push(moe_block.parallel_ffn.moe.utilization.fractions());
+                moe_block.parallel_ffn.moe.utilization.reset();
+            }
+
+            if let Some(ref ple) = self.ple {
+                h = ple.forward(&out.hidden, i);
+            } else {
+                h = out.hidden;
+            }
+
+            new_caches.push(out.kv_cache);
+        }
+
+        // Cache final norm input/output
+        fwd_cache.final_norm_input = h.clone();
+        h = self.final_norm.forward(&h);
+        fwd_cache.final_norm_out = h.clone();
+
+        // Output projection
+        let logits = tensor::matmul(&h, &self.output_proj);
+
+        let output = ModelOutput {
+            logits,
+            kv_caches: new_caches,
+            max_attn_logit: max_logit,
+            expert_utilization: expert_util,
+        };
+
+        (output, fwd_cache)
+    }
+
     /// Count total parameters.
     pub fn param_count_total(&self) -> usize {
         let embed = self.embedding.weight.numel();
