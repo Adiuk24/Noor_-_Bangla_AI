@@ -58,6 +58,24 @@ enum Commands {
         #[arg(short, long)]
         config: String,
     },
+    /// Preprocess raw text into tokenized binary shards
+    Preprocess {
+        /// Input text file
+        #[arg(short, long)]
+        input: String,
+        /// Output directory for shards
+        #[arg(short, long)]
+        output: String,
+        /// Vocab size for byte-level tokenizer
+        #[arg(long, default_value = "32000")]
+        vocab_size: usize,
+        /// Tokens per shard
+        #[arg(long, default_value = "100000")]
+        shard_size: usize,
+        /// Context length for sequence splitting
+        #[arg(long, default_value = "2048")]
+        context_length: usize,
+    },
     /// Generate synthetic training data (pre-tokenized shards)
     GenData {
         /// Output directory for shards
@@ -87,6 +105,9 @@ fn main() {
         }
         Commands::Eval { config, data } => {
             cmd_eval(&config, &data);
+        }
+        Commands::Preprocess { input, output, vocab_size, shard_size, context_length } => {
+            cmd_preprocess(&input, &output, vocab_size, shard_size, context_length);
         }
         Commands::Bench { config } => {
             cmd_bench(&config);
@@ -237,4 +258,51 @@ fn cmd_gen_data(output_dir: &str, vocab_size: usize, num_tokens: usize, shard_si
     }
 
     eprintln!("Done. {} shards, {} total tokens.", shard_idx, num_tokens);
+}
+
+fn cmd_preprocess(input_path: &str, output_dir: &str, vocab_size: usize, shard_size: usize, context_length: usize) {
+    std::fs::create_dir_all(output_dir).expect("Failed to create output dir");
+
+    eprintln!("Reading: {input_path}");
+    let text = std::fs::read_to_string(input_path).expect("Failed to read input file");
+    eprintln!("Text size: {} bytes", text.len());
+
+    // Byte-level tokenization
+    let tokenizer = noor_core::tokenizer::NoorTokenizer::byte_level(vocab_size);
+    let all_tokens = tokenizer.encode(&text);
+    eprintln!("Total tokens: {} (byte-level)", all_tokens.len());
+
+    // Split into sequences of context_length + 1 (for input/target pairs)
+    let seq_len = context_length + 1;
+    let n_sequences = all_tokens.len() / seq_len;
+    eprintln!("Sequences (ctx={}): {}", context_length, n_sequences);
+
+    let mut shard_idx = 0;
+    let mut seq_start = 0;
+    let seqs_per_shard = shard_size / seq_len;
+
+    while seq_start < n_sequences {
+        let seq_end = (seq_start + seqs_per_shard).min(n_sequences);
+        let mut sequences = Vec::new();
+
+        for s in seq_start..seq_end {
+            let offset = s * seq_len;
+            let seq = all_tokens[offset..offset + seq_len].to_vec();
+            sequences.push(seq);
+        }
+
+        let shard_tokens: usize = sequences.iter().map(|s| s.len()).sum();
+        let path = Path::new(output_dir).join(format!("shard_{shard_idx:04}.bin"));
+        noor_train::data::write_shard(&path, &sequences).expect("Failed to write shard");
+        eprintln!("  {} — {} sequences, {} tokens", path.display(), sequences.len(), shard_tokens);
+
+        seq_start = seq_end;
+        shard_idx += 1;
+    }
+
+    // Save vocab for reference
+    let vocab_path = Path::new(output_dir).join("vocab.txt");
+    tokenizer.save_vocab(&vocab_path).expect("Failed to save vocab");
+
+    eprintln!("Done. {} shards from {} sequences.", shard_idx, n_sequences);
 }
