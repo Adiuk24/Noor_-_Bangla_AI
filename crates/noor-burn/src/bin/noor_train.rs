@@ -25,6 +25,14 @@ struct Args {
     /// Checkpoint output directory
     #[arg(long, default_value = "checkpoints")]
     checkpoint_dir: PathBuf,
+
+    /// Resume from checkpoint (path without extension)
+    #[arg(long)]
+    resume: Option<PathBuf>,
+
+    /// Step number to resume from (used with --resume)
+    #[arg(long, default_value = "0")]
+    resume_step: usize,
 }
 
 fn main() {
@@ -46,6 +54,7 @@ fn main() {
         eprintln!("  Backend: CUDA GPU");
         noor_burn::training::train::<MyBackend>(
             &config, &device, &args.data, Some(&args.checkpoint_dir),
+            args.resume.as_deref(), args.resume_step,
         );
     }
 
@@ -57,6 +66,7 @@ fn main() {
         eprintln!("  Backend: WGPU (Vulkan/Metal)");
         noor_burn::training::train::<MyBackend>(
             &config, &device, &args.data, Some(&args.checkpoint_dir),
+            args.resume.as_deref(), args.resume_step,
         );
     }
 
@@ -68,6 +78,7 @@ fn main() {
         eprintln!("  Backend: NdArray (CPU)");
         noor_burn::training::train::<MyBackend>(
             &config, &device, &args.data, Some(&args.checkpoint_dir),
+            args.resume.as_deref(), args.resume_step,
         );
     }
 }

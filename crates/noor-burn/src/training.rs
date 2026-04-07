@@ -33,6 +33,8 @@ pub fn train<B: burn::tensor::backend::AutodiffBackend>(
     device: &B::Device,
     data_dir: &Path,
     checkpoint_dir: Option<&Path>,
+    resume_from: Option<&Path>,
+    resume_step: usize,
 ) {
     let total_steps = config.training.total_steps;
     let warmup = config.training.warmup_steps;
@@ -57,6 +59,17 @@ pub fn train<B: burn::tensor::backend::AutodiffBackend>(
     let mut model = NoorModel::<B>::from_config(config, device);
     eprintln!("  Params: {}", model.param_count());
 
+    // Resume from checkpoint if provided
+    let start_step = if let Some(ckpt_path) = resume_from {
+        model = model
+            .load_file(ckpt_path, &CompactRecorder::new(), device)
+            .expect("Failed to load checkpoint for resume");
+        eprintln!("  Resumed from: {:?} (step {})", ckpt_path, resume_step);
+        resume_step
+    } else {
+        0
+    };
+
     // AdamW optimizer (Muon requires split 2D/1D params — will add later)
     let mut optim = AdamWConfig::new()
         .with_weight_decay(0.01)
@@ -70,7 +83,7 @@ pub fn train<B: burn::tensor::backend::AutodiffBackend>(
 
     let train_start = Instant::now();
 
-    for step in 0..total_steps {
+    for step in start_step..total_steps {
         let step_start = Instant::now();
 
         // Get batch
