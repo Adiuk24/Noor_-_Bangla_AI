@@ -169,4 +169,12 @@ fn main() {
         let device = burn::backend::ndarray::NdArrayDevice::Cpu;
         run_inference::<B>(&config, &device, &args);
     }
+
+    #[cfg(feature = "ndarray-infer")]
+    {
+        use burn::backend::NdArray;
+        type B = NdArray;
+        let device = burn::backend::ndarray::NdArrayDevice::Cpu;
+        run_inference::<B>(&config, &device, &args);
+    }
 }

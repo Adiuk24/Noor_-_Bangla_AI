@@ -1,0 +1,64 @@
+# Noor-Edge 2.8B — A100 80GB config
+# Full Edge spec with context 2048. Resumes from Kaggle checkpoint.
+# A100 80GB can handle 2.8B f32 with big batches.
+
+[model]
+name = "noor-edge"
+d_model = 1024
+n_layers = 24
+n_heads = 8
+n_kv_heads = 2
+head_dim = 128
+vocab_size = 64000
+context_length = 2048
+precision = "f32"
+
+[moe]
+enabled = false
+n_experts = 0
+n_active_experts = 0
+has_shared_expert = false
+expert_ffn_dim = 0
+dense_ffn_dim = 2816
+
+[attention]
+sliding_window = 512
+global_every_n = 0
+
+[norm]
+sandwich = false
+eps = 1e-6
+
+[residual]
+use_attnres = false
+attnres_blocks = 0
+
+[ple]
+enabled = true
+ple_dim = 128
+
+[rope]
+theta = 10000.0
+prope_theta = 1000000.0
+prope_fraction = 0.0
+
+[training]
+lr_max = 1e-4
+lr_min = 1e-5
+warmup_steps = 200
+total_steps = 20000
+batch_size_tokens = 16384   # 8 seqs × 2048
+micro_batch_tokens = 4096
+grad_clip = 1.0
+checkpoint_every_steps = 2000
+log_every_steps = 10
+
+[optimizer]
+type = "muon"
+beta = 0.9
+qk_clip_tau = 100.0
+
+[smebu]
+kappa = 5.0
+beta = 0.9
+lambda = 0.01

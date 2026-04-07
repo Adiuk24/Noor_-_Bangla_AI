@@ -11,6 +11,7 @@ default = ["ndarray"]
 cuda = ["burn/cuda", "burn/autodiff", "burn/fusion"]
 wgpu = ["burn/wgpu", "burn/autodiff", "burn/fusion"]
 ndarray = ["burn/ndarray", "burn/autodiff"]
+ndarray-infer = ["burn/ndarray"]
 
 [[bin]]
 name = "noor-train"
@@ -19,6 +20,10 @@ path = "src/bin/noor_train.rs"
 [[bin]]
 name = "noor-infer"
 path = "src/bin/noor_infer.rs"
+
+[[bin]]
+name = "noor-convert"
+path = "src/bin/noor_convert.rs"
 
 [dependencies]
 clap = { workspace = true }
