@@ -1,9 +1,13 @@
 # Noor — AI Agent Instructions
 
+## FIRST: Read the Knowledge Graph
+**Before doing ANYTHING, read `KNOWLEDGE_GRAPH.md` in this repo root.** It contains the full project context: architecture, stack, rules, training status, file map, and common mistakes to avoid. This prevents context drift.
+
 ## Project
 Noor is a custom sparse MoE language model built in Rust (no Python, no PyTorch).
-Architecture spec: `docs/2026-04-06-noor-architecture-design.md`
-Implementation plan: `docs/IMPLEMENTATION_PLAN.md`
+- Knowledge graph: `KNOWLEDGE_GRAPH.md`
+- Architecture spec: `docs/2026-04-06-noor-architecture-design.md`
+- Implementation plan: `docs/IMPLEMENTATION_PLAN.md`
 
 ## Build
 
