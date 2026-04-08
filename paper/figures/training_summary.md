@@ -3,6 +3,7 @@
 | Phase | Steps | Start Loss | Final Loss | Min Loss | Avg tok/s | Duration |
 |-------|-------|-----------|-----------|---------|-----------|----------|
 | Phase 1: Base Pretrain | 2000–19990 | 7.4654 | 5.6430 | 1.0937 | 2852 | 248.1 min |
+| Phase 2: Bangla CC | 0–24990 | 12.1013 | 2.6365 | 2.2905 | 2868 | 343.3 min |
 
 ## Model Configuration
 - **Model:** Noor-Edge (2.8B total, 430M active)
@@ -18,4 +19,4 @@
 - `throughput.png` — Tokens/sec over training
 - `lr_schedule.png` — Learning rate schedule
 
-*Generated: 2026-04-08 15:03*
+*Generated: 2026-04-08 18:02*
