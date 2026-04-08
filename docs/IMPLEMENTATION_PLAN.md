@@ -974,6 +974,167 @@ Every step has: **input** (what must exist before starting), **action** (exactly
 
 ---
 
+## PHASE 8: Training Execution & Data Pipeline (April 2026)
+
+### Current Status (2026-04-08)
+
+| Phase | Data | Steps | Status |
+|-------|------|-------|--------|
+| Phase 1 — Base pretrain | 575M tokens (1,154 shards) | 20K | ✅ Complete. Loss 7.4→3.0 |
+| Phase 2 — Bangla CC | ~2B tokens (17,231 shards) | 25K | 🔄 Running on RunPod A100 |
+| Phase 3 — Reasoning | DeepSeek R1 (229MB, 121 shards) | TBD | Shards ready |
+| Phase 4 — Instruction | OpenHermes + Bangla + Opus reasoning | TBD | Shards ready |
+
+### Checkpoints
+- Phase 1 final: `Adiuk/noor-edge-checkpoints` → `edge_a100_20k/noor_final.mpk` (860MB)
+- Training logs: `logs/phase1_base_20k.log`
+- Phase 2 config: `config/edge_a100_phase2.toml` (lr_max=3e-5, lr_min=1e-6, warmup=100, total=25K)
+
+### Training Config (RunPod A100 80GB)
+- Batch: 2048 tokens (1 seq × 2048 context)
+- Checkpoint every 500 steps → `/runpod-volume/`
+- ~2960 tok/s throughput
+- Resume with `--resume-step` flag to preserve LR schedule
+
+---
+
+## PHASE 9: Borno v2 Tokenizer Upgrade
+
+### Step 9.1 — Corpus Collection (Mac M4, free)
+
+**Input:** Internet access, ADISDRIVE.
+
+**Action:**
+1. Download CC-100 Bangla subset (~3.5GB)
+2. Download Oscar Bangla (~5GB)
+3. Download Bangla Wikipedia dump (~500MB)
+4. Extract TitulM subset (~5GB from existing HF downloads)
+5. FineWeb-Edu English subset (~12GB)
+6. The Stack v2 subset: Python, JS, Rust, Zig, Mojo (~5GB)
+7. Add ADISDRIVE golden datasets (290K lines)
+8. Total: ~30GB balanced corpus
+
+**Output:** `data/borno_v2_corpus/` with `bangla/`, `english/`, `code/` subdirectories.
+
+**Test:** `wc -l` on each → confirm 45% Bangla, 35% English, 20% code by volume.
+
+---
+
+### Step 9.2 — Switch to Unigram LM (Mac M4, free)
+
+**Input:** Step 9.1 complete.
+
+**Action:**
+1. Update `crates/borno/src/trainer.rs` to use SentencePiece Unigram LM algorithm instead of BPE
+   - Option A: Call SentencePiece via Rust FFI (`sentencepiece` crate)
+   - Option B: Train with SentencePiece CLI, import resulting model into Borno's encoder
+2. Configure:
+   - Vocab size: **80,000**
+   - Character coverage: 0.9999
+   - Byte fallback: enabled
+   - Seed characters: all Bangla Unicode block (U+0980–U+09FF)
+   - Split rule: never split within grapheme clusters (keep `bangla.rs` logic)
+3. Target vocab allocation: 25K Bangla + 30K English + 12K code + 5K numbers/punct + 5K shared + 3K special/byte
+
+**Output:** `checkpoints/tokenizer_v2/borno_encoder_v2.bin` + `tokenizer_v2.json`
+
+**Test:** Fertility validation:
+- Bangla news (Prothom Alo): ≤1.7 tokens/word
+- English (WikiText-103): ≤1.35 tokens/word
+- Code (HumanEval): ≤1.5 tokens/word
+- Zero byte-fallback on top 10K Bangla words
+
+---
+
+### Step 9.3 — Add New Special Tokens
+
+**Input:** Step 9.2 complete.
+
+**Action:**
+1. Update `crates/borno/src/vocab.rs` special token range:
+   ```
+   ID 0-255:       Raw byte fallback
+   ID 256-270:     Existing special tokens (bos, eos, pad, unk, user, assistant, system, tool_call, tool_result, think, /think, memory, /memory, code, /code)
+   ID 271-279:     New special tokens:
+     271: <lang_bn>     — Bangla region marker
+     272: <lang_en>     — English region marker
+     273: <num>         — xVal continuous number start
+     274: <num_end>     — number end
+     275-279: reserved  — future audio/vision/video tokens
+   ID 280-2999:    Reserved
+   ID 3000-79999:  Unigram LM learned tokens (77,000)
+   ```
+
+**Output:** Updated vocab with language tags and number encoding tokens.
+
+**Test:** `borno.encode("<lang_bn>") == [271]`, `borno.encode("<num>3.14<num_end>") == [273, ..., 274]`
+
+---
+
+### Step 9.4 — Re-shard All Training Data (Mac/Desktop, free)
+
+**Input:** Step 9.3 complete, all raw data available.
+
+**Action:**
+1. Re-run `borno-shard` with v2 encoder on ALL training data:
+   - Phase 1 base data → `data/noor_training_v2/shards/`
+   - Bangla CC → `data/distillation_v2/shards/bangla_cc/`
+   - DeepSeek R1 → `data/distillation_v2/shards/deepseek_r1/`
+   - OpenHermes + Bangla + Opus → `data/distillation_v2/shards/instruction/`
+2. Reset dedup hashes (new tokenizer = start fresh)
+3. Upload all v2 shards to HuggingFace
+
+**Output:** Complete v2 shard set on HF, ready for RunPod.
+
+**Test:** Token count per shard set matches expected (~40% fewer Bangla tokens due to better fertility).
+
+---
+
+### Step 9.5 — Retrain Noor with Borno v2 (RunPod A100)
+
+**Input:** Step 9.4 complete, v2 shards uploaded to HF.
+
+**Action:**
+1. Update `config/edge.toml` and variants: `vocab_size = 80000`
+2. Fresh training run — new vocab = new embedding matrix = incompatible with v1 checkpoints
+3. Phase 1-4 sequential training with v2 shards
+4. Budget: ~$30-50 for full 4-phase run
+
+**Output:** Noor-Edge trained on Borno v2 tokenizer.
+
+**Test:** Compare loss curves and eval metrics against v1 baseline.
+
+---
+
+## PHASE 10: Gemma 4 Architecture Alignment
+
+### Step 10.1 — Architecture Updates to Evaluate
+
+Based on Gemma 4 (April 2026) confirmed architecture details:
+
+| Change | Impact | Priority |
+|--------|--------|----------|
+| Attention scaling = 1.0 (QK-norm replaces 1/sqrt(d)) | Simplification, potentially better training | High — easy to test |
+| KV sharing across layers (20/35 for Edge) | ~40% KV memory savings | High — critical for edge |
+| Increase experts 32→64-128 for Pro | More specialization, Gemma 4 proves 128 works | Medium |
+| PLE dim 128→256 | Match Gemma 4 E2B, more per-layer capacity | Medium |
+| Double-wide MLP on KV-shared layers | Compensate for shared KV | Medium |
+| K=V sharing on global attention | Eliminate V projection | Low — save for Pro/Max |
+
+### Step 10.2 — Data-Dimensional Formatting (NoorForge)
+
+Research findings from The Well (PolymathicAI) pattern applied to language:
+
+1. **Per-language embedding normalization** — separate LayerNorm γ,β for Bangla vs English
+2. **PCsInit** — initialize embedding layer with PCA of training data corpus (arXiv 2501.19114)
+3. **Wave Network encoding** — complex-valued token representations (arXiv 2411.02674)
+4. **xVal number encoding** — continuous values for numbers (PolymathicAI/xVal)
+5. **Hopfield direct storage** — write key-value pairs into attention weights without gradient descent
+
+These are research directions, not committed changes. Evaluate each independently.
+
+---
+
 ## Rules for AI Agents
 
 1. **Never skip a step.** Every step has a test. Pass the test before moving on.
